@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Polygon Creator</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #btnComplete, #btnCopy, #btnReset {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #btnCopy {
+            display: none;
+            bottom: 60px;
+        }
+        #btnReset {
+            display: none;
+            bottom: 100px;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        class Polygon {
+            constructor(vertices) {
+                this.vertices = vertices;
+                this.shape = this.createShape(vertices);
+                this.edges = this.createEdges(this.shape.geometry);
+            }
+
+            createShape(vertices) {
+                const polygonShape = new THREE.Shape();
+                polygonShape.moveTo(vertices[0].x, vertices[0].y);
+                for (let i = 1; i < vertices.length; i++) {
+                    polygonShape.lineTo(vertices[i].x, vertices[i].y);
+                }
+                polygonShape.lineTo(vertices[0].x, vertices[0].y);
+
+                const extrudeSettings = { depth: 1, bevelEnabled: false };
+                const geometry = new THREE.ExtrudeGeometry(polygonShape, extrudeSettings);
+
+                const material = new THREE.MeshBasicMaterial({ color: 0xffa500 });
+
+                const mesh = new THREE.Mesh(geometry, material);
+                scene.add(mesh);
+
+                return mesh;
+            }
+
+            createEdges(geometry) {
+                const edgesGeometry = new THREE.EdgesGeometry(geometry);
+                const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+                const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+                scene.add(edges);
+
+                return edges;
+            }
+
+            clone() {
+                const clonedVertices = this.vertices.map(vertex => vertex.clone());
+                return new Polygon(clonedVertices);
+            }
+
+            remove() {
+                scene.remove(this.shape);
+                scene.remove(this.edges);
+            }
+        }
+
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 100);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const groundGeometry = new THREE.PlaneGeometry(200, 200);
+        const groundMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        scene.add(ground);
+
+        const gridHelper = new THREE.GridHelper(200, 20, 0x000000, 0x000000);
+        gridHelper.rotation.x = Math.PI / 2;
+        scene.add(gridHelper);
+
+        let vertices = [];
+        let drawingComplete = false;
+        let currentPolygon = null;
+        let vertexMarkers = [];
+
+        let copying = false;
+        let clonedPolygon = null;
+
+        let polygons = [];
+
+        document.addEventListener('mousedown', handleMouseClick, false);
+        document.addEventListener('mousemove', handleMouseMove, false);
+
+        const completeButton = document.createElement('button');
+        completeButton.id = 'btnComplete';
+        completeButton.innerText = 'Complete';
+        completeButton.style.display = 'none';
+        document.body.appendChild(completeButton);
+
+        completeButton.addEventListener('click', () => {
+            if (vertices.length > 3) {
+                currentPolygon = new Polygon(vertices);
+                polygons.push(currentPolygon);
+                vertices = [];
+                completeButton.style.display = 'none';
+                drawingComplete = true;
+                copyButton.style.display = 'block';
+                resetButton.style.display = 'block';
+            }
+        });
+
+        const copyButton = document.createElement('button');
+        copyButton.id = 'btnCopy';
+        copyButton.innerText = 'Copy';
+        copyButton.style.display = 'none';
+        copyButton.style.bottom = '60px';
+        document.body.appendChild(copyButton);
+
+        copyButton.addEventListener('click', () => {
+            if (currentPolygon) {
+                copying = true;
+                clonedPolygon = currentPolygon.clone();
+                scene.add(clonedPolygon.shape);
+                scene.add(clonedPolygon.edges);
+            }
+        });
+
+        const resetButton = document.createElement('button');
+        resetButton.id = 'btnReset';
+        resetButton.innerText = 'Reset';
+        resetButton.style.display = 'none';
+        resetButton.style.bottom = '100px';
+        document.body.appendChild(resetButton);
+
+        resetButton.addEventListener('click', () => {
+            polygons.forEach(polygon => polygon.remove());
+            polygons = [];
+            drawingComplete = false;
+            copyButton.style.display = 'none';
+            resetButton.style.display = 'none';
+            vertexMarkers.forEach(marker => scene.remove(marker));
+            vertexMarkers = [];
+        });
+
+        function handleMouseClick(event) {
+            if (event.target.tagName === 'BUTTON') return;
+
+            if (copying) {
+                copying = false;
+                polygons.push(clonedPolygon);
+                clonedPolygon = null;
+                return;
+            }
+
+            if (drawingComplete) return;
+
+            event.preventDefault();
+
+            const mouse = new THREE.Vector2(
+                (event.clientX / window.innerWidth) * 2 - 1,
+                -(event.clientY / window.innerHeight) * 2 + 1
+            );
+
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObject(ground);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                vertices.push(new THREE.Vector3(point.x, point.y, 0.1));
+                placeVertexMarker(point);
+                if (vertices.length > 3) {
+                    completeButton.style.display = 'block';
+                }
+            }
+        }
+
+        function handleMouseMove(event) {
+            if (copying && clonedPolygon) {
+                const mouse = new THREE.Vector2(
+                    (event.clientX / window.innerWidth) * 2 - 1,
+                    -(event.clientY / window.innerHeight) * 2 + 1
+                );
+
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(mouse, camera);
+
+                const intersects = raycaster.intersectObject(ground);
+
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    clonedPolygon.shape.position.set(point.x, point.y, 0.1);
+                    clonedPolygon.edges.position.set(point.x, point.y, 0.1);
+                }
+            }
+        }
+
+        function placeVertexMarker(pos) {
+            const markerGeometry = new THREE.SphereGeometry(1, 16, 16);
+            const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+            marker.position.copy(pos);
+            scene.add(marker);
+            vertexMarkers.push(marker);
+        }
+
+        function render() {
+            requestAnimationFrame(render);
+            renderer.render(scene, camera);
+        }
+        render();
+    </script>
+</body>
+</html>
